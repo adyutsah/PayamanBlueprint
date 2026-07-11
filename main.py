@@ -1,199 +1,305 @@
+"""
+main.py
+-------
+Entry point for the Payaman Blueprint application.
+
+Responsibilities:
+  1. Configure the page and inject custom "modern SaaS" CSS.
+  2. Provide a login / registration portal (st.tabs) when no user is
+     authenticated, backed by users.csv (passwords hashed with hashlib).
+  3. Once authenticated, render a dark-themed sidebar with page
+     navigation (st.navigation / st.Page) and a logout button, then
+     hand off rendering to the selected page in views/.
+
+Run with:  streamlit run main.py
+"""
+
 import streamlit as st
 import pandas as pd
-import numpy as np
-import os
-import hashlib
+from datetime import datetime
 
-# --- CONFIGURATION & STYLING ---
-st.set_page_config(page_title="Payaman Blueprint", page_icon="💰", layout="wide")
+import utils
 
-st.markdown("""
-    <style>
-    .main .block-container {padding-top: 2rem;}
-    div[data-testid="stMetric"] {
-        background-color: #f8f9fa;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #e9ecef;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# ---------------------------------------------------------------------------
+# PAGE CONFIG — must be the first Streamlit call in the script
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="Payaman Blueprint",
+    page_icon="💰",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-DATA_DIR = "data"
-USERS_FILE = "users.csv"
-if not os.path.exists(DATA_DIR):
-    os.makedirs(DATA_DIR)
+utils.ensure_data_dir()
 
-# --- HELPER FUNCTIONS ---
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
 
-def load_users():
-    if os.path.exists(USERS_FILE):
-        try:
-            return pd.read_csv(USERS_FILE).to_dict(orient="records")
-        except Exception:
-            return []
-    return []
+# ---------------------------------------------------------------------------
+# CUSTOM CSS — modern SaaS aesthetic: Inter font, white "card" metrics/forms
+# with soft shadows + rounded corners, dark navy sidebar (#0f172a)
+# ---------------------------------------------------------------------------
+def inject_custom_css():
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-def save_user(email, password):
-    users = load_users()
-    if any(u['email'] == email for u in users):
-        return False
-    new_user = {"email": email, "password": hash_password(password)}
-    users.append(new_user)
-    pd.DataFrame(users).to_csv(USERS_FILE, index=False)
-    return True
-
-def verify_user(email, password):
-    users = load_users()
-    hashed = hash_password(password)
-    return any(u['email'] == email and u['password'] == hashed for u in users)
-
-def get_user_file(email):
-    safe_name = email.replace("@", "_").replace(".", "_")
-    return os.path.join(DATA_DIR, f"{safe_name}_finances.csv")
-
-def load_user_data(email):
-    filepath = get_user_file(email)
-    if os.path.exists(filepath):
-        try:
-            return pd.read_csv(filepath).iloc[0].to_dict()
-        except Exception:
-            pass
-    return {
-        "monthly_income": 5000.0, "monthly_expense": 3000.0,
-        "savings_balance": 10000.0, "investment_balance": 25000.0,
-        "other_assets": 5000.0, "annual_return": 7.0, "target_amount": 500000.0
-    }
-
-def save_user_data(email, data):
-    filepath = get_user_file(email)
-    pd.DataFrame([data]).to_csv(filepath, index=False)
-
-# --- SESSION STATE INITIALIZATION ---
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-    st.session_state.user_email = ""
-
-# --- AUTHENTICATION INTERFACE ---
-if not st.session_state.authenticated:
-    st.title("🔒 Payaman Blueprint - Portal")
-    tab1, tab2 = st.tabs(["Login", "Sign Up"])
-    
-    with tab1:
-        login_email = st.text_input("Email Address", key="l_email")
-        login_pass = st.text_input("Password", type="password", key="l_pass")
-        if st.button("Sign In", type="primary"):
-            if verify_user(login_email, login_pass):
-                st.session_state.authenticated = True
-                st.session_state.user_email = login_email
-                st.rerun()
-            else:
-                st.error("Invalid email or password.")
-                
-    with tab2:
-        reg_email = st.text_input("Email Address", key="r_email")
-        reg_pass = st.text_input("Password", type="password", key="r_pass")
-        if st.button("Create Account"):
-            if reg_email and reg_pass:
-                if save_user(reg_email, reg_pass):
-                    st.success("Account created successfully! Please log in.")
-                else:
-                    st.error("User already exists.")
-            else:
-                st.error("Please fill in all fields.")
-    st.stop()
-
-# --- DASHBOARD LOGIC ---
-user_email = st.session_state.user_email
-user_data = load_user_data(user_email)
-
-with st.sidebar:
-    st.subheader(f"👤 {user_email}")
-    if st.button("Log Out", type="secondary", use_container_width=True):
-        st.session_state.authenticated = False
-        st.session_state.user_email = ""
-        st.rerun()
-    st.markdown("---")
-    st.subheader("🛠️ Quick Data Update")
-    
-    inc = st.number_input("Monthly Income ($)", value=float(user_data["monthly_income"]), step=100.0)
-    exp = st.number_input("Monthly Expenses ($)", value=float(user_data["monthly_expense"]), step=100.0)
-    sav = st.number_input("Current Savings ($)", value=float(user_data["savings_balance"]), step=500.0)
-    inv = st.number_input("Current Investments ($)", value=float(user_data["investment_balance"]), step=500.0)
-    ast = st.number_input("Other Assets ($)", value=float(user_data["other_assets"]), step=500.0)
-    ret = st.slider("Expected Annual Return (%)", 0.0, 20.0, float(user_data["annual_return"]), 0.5)
-    tgt = st.number_input("Financial Target Milestone ($)", value=float(user_data["target_amount"]), step=10000.0)
-    
-    if st.button("Save Changes", type="primary", use_container_width=True):
-        updated_data = {
-            "monthly_income": inc, "monthly_expense": exp, "savings_balance": sav,
-            "investment_balance": inv, "other_assets": ast, "annual_return": ret, "target_amount": tgt
+        html, body, [class*="css"], .stApp, .stMarkdown, p, span, label {
+            font-family: 'Inter', sans-serif;
         }
-        save_user_data(user_email, updated_data)
-        st.success("Data synced successfully!")
-        st.rerun()
 
-st.title("📈 Payaman Blueprint Personal Advisor Dashboard")
+        /* ---------- App background ---------- */
+        .stApp {
+            background-color: #f8fafc;
+        }
 
-monthly_surplus = inc - exp
-annual_savings_contribution = monthly_surplus * 12
-total_net_worth = sav + inv + ast
+        /* ---------- Headings ---------- */
+        h1, h2, h3 {
+            color: #0f172a;
+            font-weight: 700;
+        }
 
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Total Net Worth", f"${total_net_worth:,.2f}")
-with col2:
-    st.metric("Monthly Surplus", f"${monthly_surplus:,.2f}", delta=f"{(monthly_surplus/inc)*100:.1f}% Savings" if inc > 0 else None)
-with col3:
-    st.metric("Current Investments", f"${inv:,.2f}")
-with col4:
-    st.metric("Target Milestone", f"${tgt:,.2f}")
+        /* ---------- Sidebar: dark navy theme ---------- */
+        [data-testid="stSidebar"] {
+            background-color: #0f172a;
+            border-right: 1px solid #1e293b;
+        }
+        [data-testid="stSidebar"] * {
+            color: #e2e8f0 !important;
+        }
+        [data-testid="stSidebarNav"] a {
+            border-radius: 8px;
+            transition: background-color 0.15s ease;
+        }
+        [data-testid="stSidebarNav"] a:hover {
+            background-color: #1e293b;
+        }
+        [data-testid="stSidebar"] hr {
+            border-color: #1e293b;
+        }
+        [data-testid="stSidebar"] .stButton button {
+            background-color: #1e293b;
+            color: #f1f5f9 !important;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+        [data-testid="stSidebar"] .stButton button:hover {
+            background-color: #ef4444;
+            border-color: #ef4444;
+            transform: translateY(-1px);
+        }
 
-st.markdown("---")
+        /* ---------- Metric cards (white, shadowed, rounded) ---------- */
+        div[data-testid="stMetric"] {
+            background-color: #ffffff;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            border: 1px solid #f1f5f9;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        div[data-testid="stMetric"]:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.12);
+        }
+        div[data-testid="stMetricLabel"] {
+            font-weight: 600;
+            color: #64748b;
+        }
+        div[data-testid="stMetricValue"] {
+            font-weight: 800;
+            color: #0f172a;
+        }
 
-tab_overview, tab_projection = st.tabs(["📊 Current Asset Breakdown", "🔮 30-Year Compounding Projection"])
+        /* ---------- Forms styled as white cards ---------- */
+        div[data-testid="stForm"] {
+            background-color: #ffffff;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            border: 1px solid #f1f5f9;
+        }
 
-with tab_overview:
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        st.subheader("Portfolio Composition")
-        breakdown_df = pd.DataFrame({
-            "Asset Type": ["Savings", "Investments", "Other Assets"],
-            "Value ($)": [sav, inv, ast]
-        })
-        st.dataframe(breakdown_df, hide_index=True, use_container_width=True)
-    with c2:
-        st.subheader("Visual Distribution")
-        st.bar_chart(breakdown_df, x="Asset Type", y="Value ($)")
+        /* ---------- Buttons ---------- */
+        .stButton button, .stFormSubmitButton button {
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .stFormSubmitButton button {
+            background-color: #6366f1;
+            color: white;
+            border: none;
+        }
+        .stFormSubmitButton button:hover {
+            background-color: #4f46e5;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px 0 rgba(99, 102, 241, 0.3);
+        }
 
-with tab_projection:
-    st.subheader("The Power of Compounding")
-    years = st.slider("Projection Horizon (Years)", 5, 50, 20)
-    
-    r = ret / 100
-    projection_list = []
-    current_inv_pool = inv + sav
-    
-    for year in range(0, years + 1):
-        if year == 0:
-            future_value = current_inv_pool
-        else:
-            future_value = (current_inv_pool * ((1 + r) ** year)) + (annual_savings_contribution * (((1 + r) ** year - 1) / r) if r > 0 else annual_savings_contribution * year)
-        
-        projection_list.append({
-            "Year": year,
-            "Projected Wealth ($)": round(future_value, 2),
-            "Target Milestone ($)": tgt
-        })
-        
-    df_proj = pd.DataFrame(projection_list).set_index("Year")
-    
-    milestone_hit = df_proj[df_proj["Projected Wealth ($)"] >= tgt]
-    if not milestone_hit.empty:
-        st.success(f"🎉 **Advisor Tip:** You will hit your **${tgt:,.2f}** target in **{milestone_hit.index[0]} years**!")
-    else:
-        st.warning(f"⚠️ **Advisor Tip:** You will not hit your target within {years} years at your current rate.")
+        /* ---------- DataFrames ---------- */
+        div[data-testid="stDataFrame"] {
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        }
 
-    st.line_chart(df_proj, y=["Projected Wealth ($)", "Target Milestone ($)"])
+        /* ---------- Tabs (login / register) ---------- */
+        button[data-baseweb="tab"] {
+            font-weight: 600;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+inject_custom_css()
+
+# ---------------------------------------------------------------------------
+# SESSION STATE INITIALIZATION
+# ---------------------------------------------------------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user_email" not in st.session_state:
+    st.session_state.user_email = None
+if "user_name" not in st.session_state:
+    st.session_state.user_name = None
+
+
+# ---------------------------------------------------------------------------
+# LOGIN / REGISTRATION PORTAL
+# ---------------------------------------------------------------------------
+def login_register_portal():
+    st.markdown(
+        """
+        <div style="text-align:center; padding: 40px 0 10px 0;">
+            <h1 style="font-size: 2.4rem;">💰 Payaman Blueprint</h1>
+            <p style="color:#64748b; font-size:1.05rem;">
+                Your personal wealth command center
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col_l, col_c, col_r = st.columns([1, 1.3, 1])
+    with col_c:
+        tab_login, tab_register = st.tabs(["🔐 Log In", "🆕 Register"])
+
+        # Storage note — relevant if this instance is deployed on Streamlit
+        # Community Cloud, where local CSV files are not guaranteed to
+        # survive a redeploy. See README.md "Data Persistence" section.
+        st.caption(
+            "⚠️ This demo stores data in local CSV files. If deployed on "
+            "Streamlit Community Cloud, data may reset on redeploy — see the README."
+        )
+
+        # ---------------- LOGIN ----------------
+        with tab_login:
+            with st.form("login_form"):
+                email = st.text_input("Email", key="login_email")
+                password = st.text_input("Password", type="password", key="login_password")
+                submitted = st.form_submit_button("Log In", use_container_width=True)
+
+                if submitted:
+                    if not email or not password:
+                        st.error("Please enter both email and password.")
+                    else:
+                        users = utils.load_users()
+                        match = users[users["email"].astype(str).str.lower() == email.strip().lower()]
+                        if match.empty:
+                            st.error("No account found with that email. Please register first.")
+                        elif match.iloc[0]["password_hash"] != utils.hash_password(password):
+                            st.error("Incorrect password. Please try again.")
+                        else:
+                            st.session_state.logged_in = True
+                            st.session_state.user_email = match.iloc[0]["email"]
+                            st.session_state.user_name = match.iloc[0]["name"]
+                            st.rerun()
+
+        # ---------------- REGISTER ----------------
+        with tab_register:
+            with st.form("register_form"):
+                name = st.text_input("Full Name", key="reg_name")
+                email_r = st.text_input("Email", key="reg_email")
+                password_r = st.text_input("Password", type="password", key="reg_password")
+                password_r2 = st.text_input("Confirm Password", type="password", key="reg_password2")
+                submitted_r = st.form_submit_button("Create Account", use_container_width=True)
+
+                if submitted_r:
+                    if not name.strip() or not email_r.strip() or not password_r:
+                        st.error("All fields are required.")
+                    elif password_r != password_r2:
+                        st.error("Passwords do not match.")
+                    elif len(password_r) < 6:
+                        st.error("Password must be at least 6 characters long.")
+                    else:
+                        users = utils.load_users()
+                        email_clean = email_r.strip().lower()
+                        if (users["email"].astype(str).str.lower() == email_clean).any():
+                            st.error("An account with this email already exists. Please log in instead.")
+                        else:
+                            new_user = {
+                                "name": name.strip(),
+                                "email": email_clean,
+                                "password_hash": utils.hash_password(password_r),
+                                "created_at": datetime.now().isoformat(),
+                            }
+                            users = pd.concat([users, pd.DataFrame([new_user])], ignore_index=True)
+                            utils.save_users(users)
+                            # Pre-create default finance / ledger templates for the new user
+                            utils.load_finances(email_clean)
+                            utils.load_ledger(email_clean)
+                            st.success("Account created successfully! Please switch to the Log In tab.")
+
+
+# ---------------------------------------------------------------------------
+# SIDEBAR + NAVIGATION (shown only when authenticated)
+# ---------------------------------------------------------------------------
+def sidebar_and_navigation():
+    with st.sidebar:
+        initials = "".join([p[0].upper() for p in (st.session_state.user_name or "?").split()[:2]])
+        st.markdown(
+            f"""
+            <div style="display:flex; align-items:center; gap:12px; padding: 8px 4px 20px 4px;">
+                <div style="background-color:#6366f1; width:42px; height:42px; border-radius:50%;
+                            display:flex; align-items:center; justify-content:center;
+                            font-weight:700; color:white; font-size:1rem;">
+                    {initials}
+                </div>
+                <div>
+                    <div style="font-weight:700; font-size:0.95rem;">{st.session_state.user_name}</div>
+                    <div style="font-size:0.78rem; color:#94a3b8;">{st.session_state.user_email}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        overview_page = st.Page("views/overview.py", title="Overview", icon="📊")
+        expenses_page = st.Page("views/expenses.py", title="Transaction Ledger", icon="🧾")
+        setup_page = st.Page("views/setup.py", title="Financial Profile", icon="⚙️")
+
+        pg = st.navigation([overview_page, expenses_page, setup_page])
+
+        st.markdown("---")
+        if st.button("🚪 Log Out", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.user_email = None
+            st.session_state.user_name = None
+            st.rerun()
+
+    return pg
+
+
+# ---------------------------------------------------------------------------
+# MAIN ROUTING LOGIC
+# ---------------------------------------------------------------------------
+if not st.session_state.logged_in:
+    login_register_portal()
+else:
+    page = sidebar_and_navigation()
+    page.run()

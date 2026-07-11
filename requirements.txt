@@ -1,3 +1,315 @@
-streamlit>=1.35.0
-pandas>=2.0.0
-numpy>=1.24.0
+"""
+main.py
+-------
+Entry point for the Payaman Blueprint application.
+
+Responsibilities:
+  1. Configure the page and inject custom "modern SaaS" CSS.
+  2. Provide a login / registration portal (st.tabs) when no user is
+     authenticated, backed by users.csv (passwords hashed with hashlib).
+  3. Once authenticated, render a dark-themed sidebar with page
+     navigation (st.navigation / st.Page) and a logout button, then
+     hand off rendering to the selected page in views/.
+
+Run with:  streamlit run main.py
+"""
+
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+import sys
+import os
+
+# ---------------------------------------------------------------------------
+# Ensure this script's own directory is on sys.path BEFORE importing utils.
+# Streamlit Cloud doesn't always run the app with cwd == the script's
+# directory, which can otherwise cause "ModuleNotFoundError: No module
+# named 'utils'" even when utils.py sits right next to main.py.
+# ---------------------------------------------------------------------------
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import utils
+
+# ---------------------------------------------------------------------------
+# PAGE CONFIG — must be the first Streamlit call in the script
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="Payaman Blueprint",
+    page_icon="💰",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+utils.ensure_data_dir()
+
+
+# ---------------------------------------------------------------------------
+# CUSTOM CSS — modern SaaS aesthetic: Inter font, white "card" metrics/forms
+# with soft shadows + rounded corners, dark navy sidebar (#0f172a)
+# ---------------------------------------------------------------------------
+def inject_custom_css():
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        html, body, [class*="css"], .stApp, .stMarkdown, p, span, label {
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* ---------- App background ---------- */
+        .stApp {
+            background-color: #f8fafc;
+        }
+
+        /* ---------- Headings ---------- */
+        h1, h2, h3 {
+            color: #0f172a;
+            font-weight: 700;
+        }
+
+        /* ---------- Sidebar: dark navy theme ---------- */
+        [data-testid="stSidebar"] {
+            background-color: #0f172a;
+            border-right: 1px solid #1e293b;
+        }
+        [data-testid="stSidebar"] * {
+            color: #e2e8f0 !important;
+        }
+        [data-testid="stSidebarNav"] a {
+            border-radius: 8px;
+            transition: background-color 0.15s ease;
+        }
+        [data-testid="stSidebarNav"] a:hover {
+            background-color: #1e293b;
+        }
+        [data-testid="stSidebar"] hr {
+            border-color: #1e293b;
+        }
+        [data-testid="stSidebar"] .stButton button {
+            background-color: #1e293b;
+            color: #f1f5f9 !important;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+        [data-testid="stSidebar"] .stButton button:hover {
+            background-color: #ef4444;
+            border-color: #ef4444;
+            transform: translateY(-1px);
+        }
+
+        /* ---------- Metric cards (white, shadowed, rounded) ---------- */
+        div[data-testid="stMetric"] {
+            background-color: #ffffff;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            border: 1px solid #f1f5f9;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        div[data-testid="stMetric"]:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.12);
+        }
+        div[data-testid="stMetricLabel"] {
+            font-weight: 600;
+            color: #64748b;
+        }
+        div[data-testid="stMetricValue"] {
+            font-weight: 800;
+            color: #0f172a;
+        }
+
+        /* ---------- Forms styled as white cards ---------- */
+        div[data-testid="stForm"] {
+            background-color: #ffffff;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            border: 1px solid #f1f5f9;
+        }
+
+        /* ---------- Buttons ---------- */
+        .stButton button, .stFormSubmitButton button {
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .stFormSubmitButton button {
+            background-color: #6366f1;
+            color: white;
+            border: none;
+        }
+        .stFormSubmitButton button:hover {
+            background-color: #4f46e5;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px 0 rgba(99, 102, 241, 0.3);
+        }
+
+        /* ---------- DataFrames ---------- */
+        div[data-testid="stDataFrame"] {
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        }
+
+        /* ---------- Tabs (login / register) ---------- */
+        button[data-baseweb="tab"] {
+            font-weight: 600;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+inject_custom_css()
+
+# ---------------------------------------------------------------------------
+# SESSION STATE INITIALIZATION
+# ---------------------------------------------------------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user_email" not in st.session_state:
+    st.session_state.user_email = None
+if "user_name" not in st.session_state:
+    st.session_state.user_name = None
+
+
+# ---------------------------------------------------------------------------
+# LOGIN / REGISTRATION PORTAL
+# ---------------------------------------------------------------------------
+def login_register_portal():
+    st.markdown(
+        """
+        <div style="text-align:center; padding: 40px 0 10px 0;">
+            <h1 style="font-size: 2.4rem;">💰 Payaman Blueprint</h1>
+            <p style="color:#64748b; font-size:1.05rem;">
+                Your personal wealth command center
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col_l, col_c, col_r = st.columns([1, 1.3, 1])
+    with col_c:
+        tab_login, tab_register = st.tabs(["🔐 Log In", "🆕 Register"])
+
+        # Storage note — relevant if this instance is deployed on Streamlit
+        # Community Cloud, where local CSV files are not guaranteed to
+        # survive a redeploy. See README.md "Data Persistence" section.
+        st.caption(
+            "⚠️ This demo stores data in local CSV files. If deployed on "
+            "Streamlit Community Cloud, data may reset on redeploy — see the README."
+        )
+
+        # ---------------- LOGIN ----------------
+        with tab_login:
+            with st.form("login_form"):
+                email = st.text_input("Email", key="login_email")
+                password = st.text_input("Password", type="password", key="login_password")
+                submitted = st.form_submit_button("Log In", use_container_width=True)
+
+                if submitted:
+                    if not email or not password:
+                        st.error("Please enter both email and password.")
+                    else:
+                        users = utils.load_users()
+                        match = users[users["email"].astype(str).str.lower() == email.strip().lower()]
+                        if match.empty:
+                            st.error("No account found with that email. Please register first.")
+                        elif match.iloc[0]["password_hash"] != utils.hash_password(password):
+                            st.error("Incorrect password. Please try again.")
+                        else:
+                            st.session_state.logged_in = True
+                            st.session_state.user_email = match.iloc[0]["email"]
+                            st.session_state.user_name = match.iloc[0]["name"]
+                            st.rerun()
+
+        # ---------------- REGISTER ----------------
+        with tab_register:
+            with st.form("register_form"):
+                name = st.text_input("Full Name", key="reg_name")
+                email_r = st.text_input("Email", key="reg_email")
+                password_r = st.text_input("Password", type="password", key="reg_password")
+                password_r2 = st.text_input("Confirm Password", type="password", key="reg_password2")
+                submitted_r = st.form_submit_button("Create Account", use_container_width=True)
+
+                if submitted_r:
+                    if not name.strip() or not email_r.strip() or not password_r:
+                        st.error("All fields are required.")
+                    elif password_r != password_r2:
+                        st.error("Passwords do not match.")
+                    elif len(password_r) < 6:
+                        st.error("Password must be at least 6 characters long.")
+                    else:
+                        users = utils.load_users()
+                        email_clean = email_r.strip().lower()
+                        if (users["email"].astype(str).str.lower() == email_clean).any():
+                            st.error("An account with this email already exists. Please log in instead.")
+                        else:
+                            new_user = {
+                                "name": name.strip(),
+                                "email": email_clean,
+                                "password_hash": utils.hash_password(password_r),
+                                "created_at": datetime.now().isoformat(),
+                            }
+                            users = pd.concat([users, pd.DataFrame([new_user])], ignore_index=True)
+                            utils.save_users(users)
+                            # Pre-create default finance / ledger templates for the new user
+                            utils.load_finances(email_clean)
+                            utils.load_ledger(email_clean)
+                            st.success("Account created successfully! Please switch to the Log In tab.")
+
+
+# ---------------------------------------------------------------------------
+# SIDEBAR + NAVIGATION (shown only when authenticated)
+# ---------------------------------------------------------------------------
+def sidebar_and_navigation():
+    with st.sidebar:
+        initials = "".join([p[0].upper() for p in (st.session_state.user_name or "?").split()[:2]])
+        st.markdown(
+            f"""
+            <div style="display:flex; align-items:center; gap:12px; padding: 8px 4px 20px 4px;">
+                <div style="background-color:#6366f1; width:42px; height:42px; border-radius:50%;
+                            display:flex; align-items:center; justify-content:center;
+                            font-weight:700; color:white; font-size:1rem;">
+                    {initials}
+                </div>
+                <div>
+                    <div style="font-weight:700; font-size:0.95rem;">{st.session_state.user_name}</div>
+                    <div style="font-size:0.78rem; color:#94a3b8;">{st.session_state.user_email}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        overview_page = st.Page("views/overview.py", title="Overview", icon="📊")
+        expenses_page = st.Page("views/expenses.py", title="Transaction Ledger", icon="🧾")
+        setup_page = st.Page("views/setup.py", title="Financial Profile", icon="⚙️")
+
+        pg = st.navigation([overview_page, expenses_page, setup_page])
+
+        st.markdown("---")
+        if st.button("🚪 Log Out", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.user_email = None
+            st.session_state.user_name = None
+            st.rerun()
+
+    return pg
+
+
+# ---------------------------------------------------------------------------
+# MAIN ROUTING LOGIC
+# ---------------------------------------------------------------------------
+if not st.session_state.logged_in:
+    login_register_portal()
+else:
+    page = sidebar_and_navigation()
+    page.run()

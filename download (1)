@@ -1,0 +1,97 @@
+"""
+views/setup.py
+---------------
+Financial Profile — configuration page for the master variables that
+drive the Executive Overview's metrics and 15-year projection.
+
+Overwrites data/{email}_finances.csv on save (single-row profile).
+"""
+
+import streamlit as st
+import sys
+import os
+
+# Ensure the project root (parent of views/) is on sys.path so `import utils`
+# resolves regardless of Streamlit Cloud's working directory.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import utils
+
+email = st.session_state.get("user_email")
+
+st.title("⚙️ Financial Profile")
+st.caption("These figures power your Overview dashboard and 15-year wealth projection. Update anytime.")
+
+finances = utils.load_finances(email)
+row = finances.iloc[0]
+
+with st.form("setup_form"):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        monthly_income = st.number_input(
+            "Base Monthly Income (₱)",
+            min_value=0.0,
+            value=float(row.get("monthly_income", 0) or 0),
+            step=1000.0,
+            help="Your regular take-home income per month, before manual expense entries.",
+        )
+        liquid_savings = st.number_input(
+            "Current Liquid Savings (₱)",
+            min_value=0.0,
+            value=float(row.get("liquid_savings", 0) or 0),
+            step=1000.0,
+            help="Cash and cash-equivalents readily available (bank accounts, e-wallets, etc).",
+        )
+        investments = st.number_input(
+            "Active Investments (₱)",
+            min_value=0.0,
+            value=float(row.get("investments", 0) or 0),
+            step=1000.0,
+            help="Current market value of PSE equities, crypto, feeder funds, and similar holdings.",
+        )
+
+    with col2:
+        other_assets = st.number_input(
+            "Other Assets (₱)",
+            min_value=0.0,
+            value=float(row.get("other_assets", 0) or 0),
+            step=1000.0,
+            help="Property, vehicles, or any other assets not captured above.",
+        )
+        target_goal = st.number_input(
+            "Ultimate Wealth Target (₱)",
+            min_value=0.0,
+            value=float(row.get("target_goal", 0) or 0),
+            step=10000.0,
+            help="Your long-term net worth goal — shown as a dashed line on the projection chart.",
+        )
+        growth_rate = st.slider(
+            "Target Portfolio Growth Rate (%)",
+            min_value=0.0,
+            max_value=25.0,
+            value=float(row.get("growth_rate", 8.0) or 8.0),
+            step=0.5,
+            help="Assumed annual compounding rate used in the 15-year projection.",
+        )
+
+    submitted = st.form_submit_button("💾 Save Financial Profile", use_container_width=True)
+
+    if submitted:
+        utils.save_finances(
+            email,
+            {
+                "monthly_income": monthly_income,
+                "liquid_savings": liquid_savings,
+                "investments": investments,
+                "other_assets": other_assets,
+                "target_goal": target_goal,
+                "growth_rate": growth_rate,
+            },
+        )
+        st.success("Financial profile saved successfully! Head to the Overview page to see the update.")
+        st.rerun()
+
+st.markdown("---")
+current_net_worth = float(row.get("liquid_savings", 0) or 0) + float(row.get("investments", 0) or 0) + float(row.get("other_assets", 0) or 0)
+st.caption(f"Current recorded net worth: ₱{current_net_worth:,.2f} · Last updated: {row.get('updated_at', 'never')}")
